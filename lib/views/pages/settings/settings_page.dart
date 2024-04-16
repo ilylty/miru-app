@@ -235,6 +235,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     "Other": "other",
                   };
                 }
+                if (Platform.isLinux) {
+                  return {
+                    "settings.external-player-builtin".i18n: "built-in",
+                    "VLC": "vlc",
+                    "mpv": "mpv",
+                  };
+                }
                 return {
                   "settings.external-player-builtin".i18n: "built-in",
                   "VLC": "vlc",
