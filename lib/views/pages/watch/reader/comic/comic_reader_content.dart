@@ -113,6 +113,9 @@ class _ComicReaderContentState extends State<ComicReaderContent> {
               if (readerType == MangaReadMode.webTonn) {
                 final width = MediaQuery.of(context).size.width;
                 final height = MediaQuery.of(context).size.height;
+                // 防缝出血：让每张图向下多绘制 1 物理像素，相邻图片互相重叠覆盖接缝，
+                // 避免分数像素边界（图片高度通常不是整数）在合成时产生抗锯齿细缝。
+                final bleed = 1 / MediaQuery.of(context).devicePixelRatio;
                 return SizedBox(
                   width: width,
                   height: height,
@@ -138,6 +141,9 @@ class _ComicReaderContentState extends State<ComicReaderContent> {
                         padding: EdgeInsets.symmetric(
                           horizontal: viewPadding,
                         ),
+                        // 关闭每个 item 的独立 RepaintBoundary，让所有图片绘制进同一个
+                        // layer，消除排列在分数像素边界上的相邻图层之间合成的细缝。
+                        addRepaintBoundaries: false,
                         initialScrollIndex: cuurentPage,
                         itemScrollController: _c.itemScrollController,
                         itemPositionsListener: _c.itemPositionsListener,
@@ -149,6 +155,7 @@ class _ComicReaderContentState extends State<ComicReaderContent> {
                             fit: BoxFit.fitWidth,
                             placeholder: _buildPlaceholder(context),
                             headers: _c.watchData.value?.headers,
+                            layoutInsets: EdgeInsets.only(bottom: -bleed),
                           );
                         },
                         itemCount: images.length,
