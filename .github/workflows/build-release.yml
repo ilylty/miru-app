@@ -102,10 +102,16 @@ jobs:
           # 而 runner 的新编译器 (14.44) 生成的代码需要新版运行库，否则启动即崩
           # (0xC0000005 in MSVCP140.dll)。这里用 VS 自带的 Redist 目录中的新版覆盖。
           $dest = "build\windows\x64\runner\Release"
-          $redist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC" -Directory |
-                    Sort-Object Name -Descending | Select-Object -First 1
-          Write-Host "Using Redist: $($redist.FullName)"
-          $src = Join-Path $redist.FullName "x64\Microsoft.VC143.CRT"
+          # Redist 目录下既有 v143 这类符号目录，也有 14.xx.xxxxx 版本目录，
+          # 直接按 msvcp140.dll 的实际 FileVersion 挑最新的 x64 CRT。
+          $root = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC"
+          $best = Get-ChildItem $root -Recurse -File -Filter "msvcp140.dll" -ErrorAction SilentlyContinue |
+                  Where-Object { $_.DirectoryName -match '\\x64\\' } |
+                  Sort-Object { [version]$_.VersionInfo.FileVersion } -Descending |
+                  Select-Object -First 1
+          if (-not $best) { throw "Microsoft.VC143.CRT (x64) not found under $root" }
+          $src = $best.DirectoryName
+          Write-Host "Using CRT dir: $src"
           Write-Host "=== runtime versions in Redist ==="
           Get-ChildItem $src -Filter *.dll | ForEach-Object {
             "{0} => {1}" -f $_.Name, $_.VersionInfo.FileVersion
