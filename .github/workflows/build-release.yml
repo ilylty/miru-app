@@ -107,7 +107,7 @@ jobs:
           $root = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC"
           $best = Get-ChildItem $root -Recurse -File -Filter "msvcp140.dll" -ErrorAction SilentlyContinue |
                   Where-Object { $_.DirectoryName -match '\\x64\\' } |
-                  Sort-Object { [version]$_.VersionInfo.FileVersion } -Descending |
+                  Sort-Object { [version]($_.VersionInfo.FileVersion -replace '\s.*$','') } -Descending |
                   Select-Object -First 1
           if (-not $best) { throw "Microsoft.VC143.CRT (x64) not found under $root" }
           $src = $best.DirectoryName
