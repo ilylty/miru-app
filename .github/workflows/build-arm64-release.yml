@@ -4,16 +4,12 @@ on:
   push:
     branches:
       - dev
+      - main
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      KEYSTORE: keystore.jks
-      KEYSTORE_PASSWORD: miruci123
-      KEY_ALIAS: miru-ci
-      KEY_PASSWORD: miruci123
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,21 +30,19 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Generate temporary signing keystore
-        run: |
-          keytool -genkeypair -v \
-            -keystore android/app/keystore.jks \
-            -storetype JKS \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias miru-ci \
-            -storepass miruci123 -keypass miruci123 \
-            -dname "CN=miru-ci, OU=ci, O=ci, L=ci, S=ci, C=CN"
-
       - name: Build arm64-v8a release APK
         run: flutter build apk --release --target-platform android-arm64 --split-per-abi
 
-      - name: Verify artifact
+      - name: List build outputs
         run: ls -l build/app/outputs/flutter-apk/
+
+      - name: Normalize APK name
+        run: |
+          cd build/app/outputs/flutter-apk
+          if [ -f app-arm64-v8a-release-unsigned.apk ]; then
+            mv app-arm64-v8a-release-unsigned.apk app-arm64-v8a-release.apk
+          fi
+          ls -l
 
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
