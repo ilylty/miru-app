@@ -133,23 +133,14 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" "/DMyAppVersion=${{ env.APP_VERSION }}" ".\inno_setup.iss"
 
-      - name: Archive Windows portable zip
+      - name: List Windows outputs
         if: matrix.target == 'windows'
         shell: pwsh
-        run: |
-          # 注意：Compress-Archive 用通配符会把目录本身包进去，导致解压多一层目录。
-          # 这里显式列出条目，保证解压后文件直接在根目录。
-          $src = "build\windows\x64\runner\Release"
-          $items = Get-ChildItem -Path $src -Force | Select-Object -ExpandProperty FullName
-          Compress-Archive -Path $items -DestinationPath "Miru-${{ env.APP_VERSION }}-windows.zip" -Force
-          Write-Host "=== zip content (top level) ==="
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "Miru-${{ env.APP_VERSION }}-windows.zip"))
-          $zip.Entries | ForEach-Object { $_.FullName } | Where-Object { $_ -notmatch "/" } | Select-Object -First 20
-          $zip.Dispose()
-          Get-ChildItem -Recurse -File .\Output, .\Miru-*-windows.zip | Select-Object FullName, Length
+        run: Get-ChildItem -Recurse -File .\Output, build\windows\x64\runner\Release | Select-Object FullName, Length
 
-      - name: Upload Miru-${{ env.APP_VERSION }}-windows (unpacked)
+      # 注意：不要在这里再手工打 zip。上传目录 artifact 时 GitHub 会自动打包，
+      # 下载即得到结构正确的包；手工再压一层会造成二重压缩。
+      - name: Upload Miru-${{ env.APP_VERSION }}-windows
         if: matrix.target == 'windows'
         uses: actions/upload-artifact@v4
         with:
@@ -163,14 +154,6 @@ jobs:
         with:
           name: miru-setup-${{ env.APP_VERSION }}.exe
           path: Output/miru-setup-${{ env.APP_VERSION }}.exe
-          if-no-files-found: error
-
-      - name: Upload Miru-${{ env.APP_VERSION }}-windows.zip
-        if: matrix.target == 'windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Miru-${{ env.APP_VERSION }}-windows.zip
-          path: Miru-${{ env.APP_VERSION }}-windows.zip
           if-no-files-found: error
 
   release:
@@ -191,12 +174,15 @@ jobs:
         run: |
           mkdir -p release_files
           # upload-artifact 对单文件是原样保存；对目录才打包成 zip。
-          # 所以 APK / exe 直接拷贝，windows 目录包跳过（已单独提供 zip）。
           for a in app-arm64-v8a-release.apk app-armeabi-v7a-release.apk app-x86_64-release.apk "miru-setup-${{ env.APP_VERSION }}.exe"; do
             cp "artifacts/$a/$a" release_files/
           done
-          cp "artifacts/Miru-${{ env.APP_VERSION }}-windows.zip/Miru-${{ env.APP_VERSION }}-windows.zip" release_files/
-          ls -l release_files
+          # 目录 artifact 下载后就是发布包内容；在目录内部执行 zip，
+          # 条目直接位于压缩包根级，不会多套一层目录。
+          (cd "artifacts/Miru-${{ env.APP_VERSION }}-windows" && zip -qr -X "$GITHUB_WORKSPACE/release_files/Miru-${{ env.APP_VERSION }}-windows.zip" .)
+          ls -lh release_files
+          echo "=== windows zip top-level ==="
+          unzip -l "release_files/Miru-${{ env.APP_VERSION }}-windows.zip" | awk '{print $4}' | grep -v '/' | grep -v '^$' | head -20
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
