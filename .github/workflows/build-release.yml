@@ -21,7 +21,7 @@ jobs:
           - target: android
             os: ubuntu-22.04
           - target: windows
-            os: windows-latest
+            os: windows-2022
 
     steps:
       - name: Checkout
@@ -94,6 +94,13 @@ jobs:
           if-no-files-found: error
 
       # ---------------- Windows ----------------
+      - name: Diagnose Visual Studio
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products "*" -format json
+          flutter doctor -v
+
       - name: Build Windows release
         if: matrix.target == 'windows'
         run: flutter build windows --release
