@@ -90,32 +90,33 @@ jobs:
           if-no-files-found: error
 
       # ---------------- Windows ----------------
-      - name: Install MSVC 14.37 toolset (match official v1.8.1 build)
+      - name: Build Windows release
+        if: matrix.target == 'windows'
+        run: flutter build windows --release
+
+      - name: Bundle up-to-date MSVC runtime DLLs
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          # 官方 v1.8.1 用 MSVC 14.37 (VS 2022 17.7) 构建；
-          # runner 只有最新 14.44，需加装 14.37 工具集并固定使用
-          $setup = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe"
-          $installPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
-          $args = @(
-            "modify",
-            "--installPath", $installPath,
-            "--add", "Microsoft.VisualStudio.Component.VC.14.37.17.7.x86.x64",
-            "--quiet", "--norestart"
-          )
-          $p = Start-Process -FilePath $setup -ArgumentList $args -Wait -PassThru
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
-            Write-Error "setup.exe modify failed with exit code $($p.ExitCode)"
-            exit $p.ExitCode
+          # 官方 v1.8.1 包内捆绑的是 2022 年的旧 MSVC 运行库 (MSVCP140 14.30)，
+          # 而 runner 的新编译器 (14.44) 生成的代码需要新版运行库，否则启动即崩
+          # (0xC0000005 in MSVCP140.dll)。这里用 VS 自带的 Redist 目录中的新版覆盖。
+          $dest = "build\windows\x64\runner\Release"
+          $redist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC" -Directory |
+                    Sort-Object Name -Descending | Select-Object -First 1
+          Write-Host "Using Redist: $($redist.FullName)"
+          $src = Join-Path $redist.FullName "x64\Microsoft.VC143.CRT"
+          Write-Host "=== runtime versions in Redist ==="
+          Get-ChildItem $src -Filter *.dll | ForEach-Object {
+            "{0} => {1}" -f $_.Name, $_.VersionInfo.FileVersion
           }
-          Get-ChildItem "$installPath\VC\Tools\MSVC" | Select-Object -ExpandProperty Name
-
-      - name: Build Windows release (MSVC 14.37)
-        if: matrix.target == 'windows'
-        env:
-          CMAKE_GENERATOR_TOOLSET: v143,version=14.37
-        run: flutter build windows --release
+          Copy-Item "$src\*.dll" -Destination $dest -Force
+          Write-Host "=== runtime versions in package after copy ==="
+          foreach ($f in @("msvcp140.dll","msvcp140_1.dll","msvcp140_2.dll","vcruntime140.dll","vcruntime140_1.dll","concrt140.dll")) {
+            $p = Join-Path $dest $f
+            if (Test-Path $p) { "{0} => {1}" -f $f, (Get-Item $p).VersionInfo.FileVersion }
+            else { "{0} => MISSING" -f $f }
+          }
 
       - name: Build Inno Setup installer
         if: matrix.target == 'windows'
@@ -126,10 +127,19 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path ".\build\windows\x64\runner\Release\*" -DestinationPath "Miru-${{ env.APP_VERSION }}-windows.zip" -Force
+          # 注意：Compress-Archive 用通配符会把目录本身包进去，导致解压多一层目录。
+          # 这里显式列出条目，保证解压后文件直接在根目录。
+          $src = "build\windows\x64\runner\Release"
+          $items = Get-ChildItem -Path $src -Force | Select-Object -ExpandProperty FullName
+          Compress-Archive -Path $items -DestinationPath "Miru-${{ env.APP_VERSION }}-windows.zip" -Force
+          Write-Host "=== zip content (top level) ==="
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "Miru-${{ env.APP_VERSION }}-windows.zip"))
+          $zip.Entries | ForEach-Object { $_.FullName } | Where-Object { $_ -notmatch "/" } | Select-Object -First 20
+          $zip.Dispose()
           Get-ChildItem -Recurse -File .\Output, .\Miru-*-windows.zip | Select-Object FullName, Length
 
-      - name: Upload Release directory (no nested zip)
+      - name: Upload Miru-${{ env.APP_VERSION }}-windows (unpacked)
         if: matrix.target == 'windows'
         uses: actions/upload-artifact@v4
         with:
@@ -170,14 +180,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p release_files
-          # Android APKs（artifact 是单文件，解包一次拿到 apk）
-          for a in app-arm64-v8a-release.apk app-armeabi-v7a-release.apk app-x86_64-release.apk; do
+          for a in app-arm64-v8a-release.apk app-armeabi-v7a-release.apk app-x86_64-release.apk "miru-setup-${{ env.APP_VERSION }}.exe"; do
             unzip -o -q "artifacts/$a/$a" -d release_files
           done
-          # Windows exe
-          unzip -o -q "artifacts/miru-setup-${{ env.APP_VERSION }}.exe/miru-setup-${{ env.APP_VERSION }}.exe" -d release_files
-          # Windows zip（artifact 是 zip 包，里面就是目标 zip，直接取出）
-          unzip -o -q "artifacts/Miru-${{ env.APP_VERSION }}-windows.zip/Miru-${{ env.APP_VERSION }}-windows.zip" -d release_files
+          cp "artifacts/Miru-${{ env.APP_VERSION }}-windows.zip/Miru-${{ env.APP_VERSION }}-windows.zip" release_files/
           ls -l release_files
 
       - name: Create GitHub Release
@@ -189,8 +195,8 @@ jobs:
             Custom build from fork `ilylty/miru-app` (branch dev).
 
             - Webtoon 条漫相邻图片接缝修复
-            - Android: 默认调试签名（需卸载官方版后安装）
-            - Windows: MSVC 14.37 工具链，与官方 v1.8.1 一致
+            - Android: 默认调试签名（与官方签名不同，安装前需卸载官方版）
+            - Windows: 捆绑最新 MSVC 运行库，修复启动闪退 (0xC0000005)
           draft: true
           files: release_files/*
           fail_on_unmatched_files: true
