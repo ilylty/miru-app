@@ -105,8 +105,12 @@ jobs:
           # Redist 目录下既有 v143 这类符号目录，也有 14.xx.xxxxx 版本目录，
           # 直接按 msvcp140.dll 的实际 FileVersion 挑最新的 x64 CRT。
           $root = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC"
+          # 只取桌面版 CRT（排除 onecore/uwp 变体，那些适用于 UWP/系统组件）
           $best = Get-ChildItem $root -Recurse -File -Filter "msvcp140.dll" -ErrorAction SilentlyContinue |
-                  Where-Object { $_.DirectoryName -match '\\x64\\' } |
+                  Where-Object {
+                    $_.DirectoryName -match '\\x64\\Microsoft\.VC143\.CRT$' -and
+                    $_.DirectoryName -notmatch 'onecore|uwp|store'
+                  } |
                   Sort-Object { [version]($_.VersionInfo.FileVersion -replace '\s.*$','') } -Descending |
                   Select-Object -First 1
           if (-not $best) { throw "Microsoft.VC143.CRT (x64) not found under $root" }
@@ -186,8 +190,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p release_files
+          # upload-artifact 对单文件是原样保存；对目录才打包成 zip。
+          # 所以 APK / exe 直接拷贝，windows 目录包跳过（已单独提供 zip）。
           for a in app-arm64-v8a-release.apk app-armeabi-v7a-release.apk app-x86_64-release.apk "miru-setup-${{ env.APP_VERSION }}.exe"; do
-            unzip -o -q "artifacts/$a/$a" -d release_files
+            cp "artifacts/$a/$a" release_files/
           done
           cp "artifacts/Miru-${{ env.APP_VERSION }}-windows.zip/Miru-${{ env.APP_VERSION }}-windows.zip" release_files/
           ls -l release_files
