@@ -31,44 +31,57 @@ class _ControlPanelHeaderState<T extends ReaderController>
       fluent.FlyoutController();
 
   Widget _buildAndroid(BuildContext context) {
-    return SafeArea(
-      child: Container(
-        height: 60,
-        color: Theme.of(context).scaffoldBackgroundColor,
-        child: AppBar(
-          title: Text(_c.title),
-          actions: [
-            IconButton(
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  builder: (context) => widget.buildSettings(context),
-                );
-              },
-              icon: const Icon(Icons.settings),
-            ),
-            IconButton(
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  builder: (context) {
-                    return Obx(
-                      () => PlayList(
-                        title: _c.title,
-                        list: _c.playList.map((e) => e.name).toList(),
-                        selectIndex: _c.index.value,
-                        onChange: (value) {
-                          _c.index.value = value;
-                          Get.back();
-                        },
-                      ),
-                    );
-                  },
-                );
-              },
-              icon: const Icon(Icons.list),
-            ),
-          ],
+    // ★ 面板背景必须铺到屏幕最顶端（含刘海 / 状态栏区域），只有**内容**
+    //   才需要避开刘海。
+    //
+    // 旧写法是 `SafeArea(child: Container(color: 面板色, child: AppBar))`：
+    // `SafeArea` 在带背景色的 `Container` **外面**，于是整个有背景的面板被
+    // inset 顶下去，**inset 那一条完全没有背景** —— 沉浸模式下系统栏已隐藏、
+    // 下面的漫画还在画，那一条就透出漫画图片，看起来就是
+    // 「面板上方是透明的，往下才是菜单栏」。
+    //
+    // 现在把背景铺在 `SafeArea` **外面**（覆盖到 y=0），`SafeArea` 留在里层
+    // 只把内容推下来，两者各司其职。
+    return Container(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: SafeArea(
+        child: SizedBox(
+          height: 60,
+          child: AppBar(
+            title: Text(_c.title),
+            actions: [
+              IconButton(
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    builder: (context) => widget.buildSettings(context),
+                  );
+                },
+                icon: const Icon(Icons.settings),
+              ),
+              IconButton(
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    builder: (context) {
+                      return Obx(
+                        () => PlayList(
+                          title: _c.title,
+                          list: _c.playList.map((e) => e.name).toList(),
+                          selectIndex: _c.index.value,
+                          onChange: (value) {
+                            _c.index.value = value;
+                            Get.back();
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+                icon: const Icon(Icons.list),
+              ),
+            ],
+          ),
         ),
       ),
     ).animate().fade();

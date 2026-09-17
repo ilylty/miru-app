@@ -32,7 +32,12 @@ class ControlPanelFooter<T extends ReaderController> extends StatelessWidget {
           children: [
             if (c.index.value > 0)
               PlatformFilledButton(
-                child: Text('common.previous'.i18n),
+                // 用 `trIn(context)` 而不是 `.i18n`：后者依赖 `i18n.dart` 里
+                // 缓存的**全局** context（Android 上是 `Get.context!`，一个
+                // 顶层 `final`，只取一次），一旦那棵树被替换/销毁就会抛
+                // 「Looking up a deactivated widget's ancestor is unsafe」。
+                // 控制面板是叠在阅读器上的浮层，取自己所在树的 context 更可靠。
+                child: Text('common.previous'.trIn(context)),
                 onPressed: () {
                   c.index.value--;
                 },
@@ -40,7 +45,7 @@ class ControlPanelFooter<T extends ReaderController> extends StatelessWidget {
             const Spacer(),
             if (c.index.value != c.playList.length - 1)
               PlatformFilledButton(
-                child: Text('common.next'.i18n),
+                child: Text('common.next'.trIn(context)),
                 onPressed: () {
                   c.index.value++;
                 },
