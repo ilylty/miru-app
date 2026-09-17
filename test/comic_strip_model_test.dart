@@ -103,6 +103,53 @@ void main() {
       expect(model.itemOffsetOfChapter(3), isNull);
     });
 
+    test('★ itemOffsetOfPage 精确定位「第几话第几页」', () {
+      final model = buildModel(
+        total: 5,
+        current: 1,
+        loaded: [0, 1, 2],
+        imagesPerChapter: 4,
+      );
+      // 第 2 话从下标 8 开始，所以它的第 3 张图是 11。
+      expect(model.itemOffsetOfPage((chapterIndex: 2, imageIndex: 3)), 11);
+      expect(model.itemOffsetOfPage((chapterIndex: 0, imageIndex: 0)), 0);
+      expect(model.itemOffsetOfPage((chapterIndex: 1, imageIndex: 2)), 6);
+    });
+
+    test('★ itemOffsetOfPage 越界 / 未装载 / null 时返回 null', () {
+      final model = buildModel(
+        total: 5,
+        current: 1,
+        loaded: [0, 1],
+        imagesPerChapter: 4,
+      );
+      expect(model.itemOffsetOfPage(null), isNull,
+          reason: '没有页级目标时应回退到话首');
+      expect(model.itemOffsetOfPage((chapterIndex: 3, imageIndex: 0)), isNull,
+          reason: '该话不在窗口内');
+      expect(model.itemOffsetOfPage((chapterIndex: 1, imageIndex: -1)), isNull,
+          reason: '页码不能为负');
+      expect(model.itemOffsetOfPage((chapterIndex: 1, imageIndex: 4)), isNull,
+          reason: '页码不能超过该话张数');
+    });
+
+    test('★ 页级下标 = 话首下标 + 页内偏移（恢复位置的基础）', () {
+      final model = buildModel(
+        total: 5,
+        current: 2,
+        loaded: [0, 1, 2],
+        imagesPerChapter: 5,
+      );
+      final chapterOffset = model.itemOffsetOfChapter(2)!;
+      expect(chapterOffset, 10);
+      for (var page = 0; page < 5; page++) {
+        expect(
+          model.itemOffsetOfPage((chapterIndex: 2, imageIndex: page)),
+          chapterOffset + page,
+        );
+      }
+    });
+
     test('indexOfItem 能定位任意 (章节, 图片)', () {
       final model = buildModel(
         total: 5,

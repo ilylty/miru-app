@@ -73,6 +73,12 @@ class StripItem {
   String toString() => 'StripItem(c$chapterIndex#$imageIndex)';
 }
 
+/// 条漫中的「页」目标：第几话的第几张图。
+///
+/// ★ 恢复上次阅读位置必须精确到这个粒度：只记到「第几话」的话，
+///   用户每次回来都会退化成从这一话第一张图开始读。
+typedef StripPageTarget = ({int chapterIndex, int imageIndex});
+
 /// 滚动锚点：视口顶部对应的条目及其相对位置。
 class StripAnchor {
   const StripAnchor({
@@ -114,8 +120,7 @@ class ComicStripModel {
         _totalChapters = totalChapters < 1 ? 1 : totalChapters,
         _previousSpan = previousSpan < 0 ? 0 : previousSpan,
         _nextSpan = nextSpan < 1 ? 1 : nextSpan,
-        _maxWindowChapters =
-            maxWindowChapters < 1 ? 1 : maxWindowChapters;
+        _maxWindowChapters = maxWindowChapters < 1 ? 1 : maxWindowChapters;
 
   /// 窗口最多包含多少话，防止超长连载把列表撑得过大。
   static const int defaultMaxWindowChapters = 20;
@@ -271,9 +276,7 @@ class ComicStripModel {
     if (indexes.isEmpty) {
       return 'empty';
     }
-    return indexes
-        .map((i) => '$i:${_chapters[i]!.urls.length}')
-        .join(',');
+    return indexes.map((i) => '$i:${_chapters[i]!.urls.length}').join(',');
   }
 
   /// 窗口展开后的扁平条目列表。
@@ -307,8 +310,29 @@ class ComicStripModel {
   }
 
   /// 当前话在窗口中的起始扁平下标；当前话不在窗口时返回 0。
-  int get currentChapterItemOffset =>
-      itemOffsetOfChapter(_currentChapter) ?? 0;
+  int get currentChapterItemOffset => itemOffsetOfChapter(_currentChapter) ?? 0;
+
+  /// 某个「页」在窗口中的扁平下标。
+  ///
+  /// [target] 为 null、该话不在窗口内、或页码越界时返回 null ——
+  /// 调用方据此回退到「话首」。
+  int? itemOffsetOfPage(StripPageTarget? target) {
+    if (target == null) {
+      return null;
+    }
+    final offset = itemOffsetOfChapter(target.chapterIndex);
+    if (offset == null) {
+      return null;
+    }
+    final chapter = _chapters[target.chapterIndex];
+    if (chapter == null) {
+      return null;
+    }
+    if (target.imageIndex < 0 || target.imageIndex >= chapter.urls.length) {
+      return null;
+    }
+    return offset + target.imageIndex;
+  }
 
   /// 在条目列表中查找某个 (章节, 图片) 的下标。
   static int? indexOfItem(
@@ -318,8 +342,7 @@ class ComicStripModel {
   ) {
     for (var i = 0; i < items.length; i++) {
       final item = items[i];
-      if (item.chapterIndex == chapterIndex &&
-          item.imageIndex == imageIndex) {
+      if (item.chapterIndex == chapterIndex && item.imageIndex == imageIndex) {
         return i;
       }
     }

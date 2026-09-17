@@ -55,6 +55,7 @@ class ComicStripViewState extends State<ComicStripView> {
   /// 扁平下标会平移，必须重建 + 锚点补偿；
   /// 普通滚动（两者都不变）依旧零重建。
   String _windowSignature = '';
+
   /// 当前**已渲染**的条目列表。
   ///
   /// 锚点换算必须用它（而不是刚更新的模型），否则会把「旧列表里的下标」
@@ -124,9 +125,26 @@ class ComicStripViewState extends State<ComicStripView> {
       return;
     }
     _appliedJumpRequest = request;
-    final offset = _c.strip.itemOffsetOfChapter(_c.index.value) ??
+    // 有页级目标时优先用它（恢复上次阅读位置）；否则对齐到话首。
+    final pageOffset = _c.strip.itemOffsetOfPage(_c.pageJumpTarget.value);
+    final offset = pageOffset ??
+        _c.strip.itemOffsetOfChapter(_c.index.value) ??
         _c.strip.currentChapterItemOffset;
     _jumpToIndex(offset, 0);
+  }
+
+  /// 列表首次挂载时列表应定位到的扁平下标。
+  ///
+  /// ★ 这是「恢复上次阅读位置」的关键：进入阅读器时历史是异步读出来的，
+  ///   恢复动作通常发生在列表挂载**之前**，此时
+  ///   `ItemScrollController.isAttached == false`，`jumpTo` 会被静默丢弃。
+  ///   所以必须把页级目标交给 `initialScrollIndex`，让首帧就落在正确的页上。
+  int _initialScrollIndex() {
+    final pageOffset = _c.strip.itemOffsetOfPage(_c.pageJumpTarget.value);
+    if (pageOffset != null) {
+      return pageOffset;
+    }
+    return _c.strip.currentChapterItemOffset;
   }
 
   void _jumpToIndex(int index, double alignment) {
@@ -171,13 +189,17 @@ class ComicStripViewState extends State<ComicStripView> {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-  /// 依赖 stripRevision：窗口内容变化时才重建。
+      /// 依赖 stripRevision：窗口内容变化时才重建。
       _c.stripRevision.value;
       final items = _c.strip.items;
       _renderedItems = items;
       if (items.isEmpty) {
         return const Center(child: CircularProgressIndicator());
       }
+      // 恢复上次阅读位置：列表**首次挂载**时把页级目标交给
+      // `initialScrollIndex`（它只在首帧生效，之后改是无效的）。
+      // 列表已经挂载时目标由 `ComicController._applyPageJump` 消费。
+      final initialScrollIndex = _initialScrollIndex();
       final width = MediaQuery.of(context).size.width;
       final height = MediaQuery.of(context).size.height;
       final viewPadding = width > 800 ? ((width - 800) / 2) : 0.0;
@@ -206,14 +228,13 @@ class ComicStripViewState extends State<ComicStripView> {
             scaleEnabled: _c.isZoom.value,
             child: ScrollablePositionedList.builder(
               key: const ValueKey('comic-strip-list'),
-              physics: _c.isZoom.value
-                  ? const NeverScrollableScrollPhysics()
-                  : null,
+              physics:
+                  _c.isZoom.value ? const NeverScrollableScrollPhysics() : null,
               padding: EdgeInsets.symmetric(horizontal: viewPadding),
               // 关闭每个 item 的独立 RepaintBoundary，让所有图片绘制进同一个
               // layer，消除排列在分数像素边界上的相邻图层之间合成的细缝。
               addRepaintBoundaries: false,
-              initialScrollIndex: _c.strip.currentChapterItemOffset,
+              initialScrollIndex: initialScrollIndex,
               itemScrollController: _c.itemScrollController,
               itemPositionsListener: _c.itemPositionsListener,
               scrollOffsetController: _c.scrollOffsetController,

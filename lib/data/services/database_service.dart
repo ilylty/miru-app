@@ -83,8 +83,21 @@ class DatabaseService {
     return db.historys.filter().typeEqualTo(type).sortByDateDesc().findAll();
   }
 
+  /// 测试注入点：不依赖 Isar 即可驱动「恢复上次阅读位置」这条链路。
+  ///
+  /// 阅读器进入时会读历史记录来恢复「第几话第几页」，但 Isar 在单元测试里
+  /// 不可用（`db` 是 late 字段，访问会抛异常并被上层吞掉），导致这条路径
+  /// 完全无法被验证。有了这个钩子就能真实地跑通恢复流程。
+  @visibleForTesting
+  static Future<History?> Function(String package, String url)?
+      historyLoaderOverride;
+
   static Future<History?> getHistoryByPackageAndUrl(
       String package, String url) async {
+    final override = historyLoaderOverride;
+    if (override != null) {
+      return override(package, url);
+    }
     return db.historys
         .filter()
         .packageEqualTo(package)
@@ -95,7 +108,20 @@ class DatabaseService {
 
   // 更新历史
 
+  /// 测试注入点：不依赖 Isar 即可验证「历史被写成了什么」。
+  ///
+  /// 阅读器关闭时会把当前页码存进历史（`ReaderController.addHistory`），
+  /// 恢复位置能不能准，首先取决于**存的时候页码对不对**。
+  /// 有了这个钩子就能真实地跑「读 → 滚 → 关 → 再进」的往返。
+  @visibleForTesting
+  static Future<void> Function(History history)? putHistoryOverride;
+
   static Future<Id> putHistory(History history) async {
+    final override = putHistoryOverride;
+    if (override != null) {
+      await override(history);
+      return 0;
+    }
     return db.writeTxn(() => db.historys.putByIndex(r'package&url', history));
   }
 

@@ -116,6 +116,7 @@ ComicController buildController({
   FakeChapterWatcher? watcher,
   ComicCacheService? cacheService,
   ComicChapterStore? chapterStore,
+  MangaReadMode initialReadMode = MangaReadMode.webTonn,
 }) {
   final effectiveConfig = config ??
       const ComicCacheConfig(
@@ -139,7 +140,7 @@ ComicController buildController({
     config: effectiveConfig,
     cacheService: cacheService,
     chapterStore: chapterStore,
-    initialReadMode: MangaReadMode.webTonn,
+    initialReadMode: initialReadMode,
   );
 }
 

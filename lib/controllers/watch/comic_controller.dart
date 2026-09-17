@@ -65,8 +65,7 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
           fetcher: (url, headers) =>
               ComicImageCache.download(url, headers: headers),
           cacheProbe: (url) => ComicImageCache.exists(url),
-          trimmer: (maxBytes, protectedUrls) =>
-              ComicImageCache.trimToLimit(
+          trimmer: (maxBytes, protectedUrls) => ComicImageCache.trimToLimit(
             maxBytes,
             protectedUrls: protectedUrls,
           ),
@@ -167,6 +166,17 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   /// 请求条漫视图在下一帧把当前话对齐到顶部（用户主动跳章时）。
   final jumpChapterRequest = 0.obs;
 
+  /// 本次跳转的**页级**目标（第几话第几张图）。
+  ///
+  /// ★ 「恢复上次阅读位置」必须精确到页：只给到「第几话」的话，
+  ///   用户每次回到阅读器都会退化成从这一话第一张图重新读。
+  ///   null 表示「对齐到话首」（播放列表选章等场景）。
+  ///
+  /// [ComicStripView] 用它决定列表**首次挂载**时的 `initialScrollIndex`，
+  /// 从而覆盖「恢复动作发生在列表挂载之前」这种真实时序
+  /// （进入阅读器时历史是异步读出来的，往往早于首帧布局）。
+  final pageJumpTarget = Rx<StripPageTarget?>(null);
+
   /// 是否处于「条漫 + 无感切换」路径。
   bool get isSeamlessStrip =>
       readType.value == MangaReadMode.webTonn && seamlessEnabled.value;
@@ -195,8 +205,7 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   /// 滚动位置上报节流，避免每帧都做章节切换判断。
   Timer? _positionThrottle;
   ItemPosition? _pendingPosition;
-  static const Duration _positionThrottleInterval =
-      Duration(milliseconds: 120);
+  static const Duration _positionThrottleInterval = Duration(milliseconds: 120);
 
   @override
   void onInit() {
@@ -222,7 +231,16 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
       }
     });
     // 如果切换章节，重置当前页码
+    //
+    // ★ 但**滚动**引起的跨话不能重置：那时 [onTopItemChanged] 已经根据
+    //   视口顶部条目算出了正确的页内下标，再重置成 0 会
+    //   1) 让页码指示器显示错；
+    //   2) 更严重的是关闭阅读器时把「第 0 页」写进历史，
+    //      于是下次恢复又退化成「该话开头」—— 恢复位置不准的真正源头。
     ever(super.index, (callback) {
+      if (_suppressReload) {
+        return;
+      }
       currentPage.value = 0;
     });
     ever(super.watchData, (callback) async {
@@ -622,7 +640,8 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
       );
       final missing = desired.where((i) => !strip.hasChapter(i)).toList();
       // 中心章节优先，其次按距离排序。
-      missing.sort((a, b) => (a - clamped).abs().compareTo((b - clamped).abs()));
+      missing
+          .sort((a, b) => (a - clamped).abs().compareTo((b - clamped).abs()));
       await Future.wait(missing.map(loadStripChapter));
       strip.pruneOutsideWindow();
     }
@@ -732,6 +751,16 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
     if (!isSeamlessStrip) {
       return;
     }
+    // 用户已经离开恢复时的位置 → 丢弃恢复目标。
+    //
+    // 否则下次列表重建（例如开关无感切换、窗口重排）会把用户
+    // 一下子拽回很久以前那次恢复的页码上。
+    final restoreTarget = pageJumpTarget.value;
+    if (restoreTarget != null &&
+        (restoreTarget.chapterIndex != item.chapterIndex ||
+            restoreTarget.imageIndex != item.imageIndex)) {
+      clearPageJumpTarget();
+    }
     currentPage.value = item.imageIndex;
     if (item.chapterIndex != index.value) {
       _suppressReload = true;
@@ -803,7 +832,8 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
         error.value = reason.isEmpty ? 'common.error'.tr : reason;
         return;
       }
-      // 用户主动跳章：请求视图在下一帧把该话对齐到顶部。
+      // 用户主动跳章：对齐到该话开头（清掉可能残留的页级目标）。
+      pageJumpTarget.value = null;
       jumpChapterRequest.value++;
     } catch (e) {
       error.value = e.toString();
@@ -815,7 +845,8 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   // ---------------------------------------------------------------------------
 
   _initSetting() async {
-    final base = _initialReadMode ?? readmode[setting] ?? MangaReadMode.standard;
+    final base =
+        _initialReadMode ?? readmode[setting] ?? MangaReadMode.standard;
     readType.value = base;
     try {
       readType.value = await DatabaseService.getMnagaReaderType(
@@ -830,18 +861,20 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
 
   _jumpPage(int page) async {
     if (readType.value == MangaReadMode.webTonn) {
+      // ★ 先登记页级目标，再等窗口装载。
+      //   顺序很重要：`ensureStripWindow` 是异步的，期间列表可能已经挂载，
+      //   那时它会用这个目标作为 `initialScrollIndex`。
+      //   反之（列表尚未挂载）则由下面的 `_applyPageJump` / 视图首帧消费。
+      pageJumpTarget.value = (
+        chapterIndex: index.value,
+        imageIndex: page,
+      );
       if (seamlessEnabled.value) {
         await ensureStripWindow(index.value);
-        final offset = strip.itemOffsetOfChapter(index.value);
-        if (offset != null && itemScrollController.isAttached) {
-          itemScrollController.jumpTo(index: offset + page);
-        }
-        return;
       }
-      if (itemScrollController.isAttached) {
-        itemScrollController.jumpTo(
-          index: page,
-        );
+      // 已经挂载就直接跳，省掉一帧的闪烁。
+      if (!_applyPageJump()) {
+        jumpChapterRequest.value++;
       }
       return;
     }
@@ -850,6 +883,33 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
       return;
     }
     pageController.value = ExtendedPageController(initialPage: page);
+  }
+
+  /// 立即应用挂起的页级跳转。
+  ///
+  /// 返回 false 表示列表还没挂载或目标越界 —— 此时目标会留在
+  /// [pageJumpTarget] 里，由 `ComicStripView` 在首次布局时消费。
+  bool _applyPageJump() {
+    final target = pageJumpTarget.value;
+    if (target == null || !itemScrollController.isAttached) {
+      return false;
+    }
+    final offset = strip.itemOffsetOfPage(target);
+    if (offset == null) {
+      return false;
+    }
+    itemScrollController.jumpTo(index: offset);
+    return true;
+  }
+
+  /// 丢弃页级跳转目标。
+  ///
+  /// 用户真的滚到别处之后就不要再留着旧目标，否则下次列表重建
+  /// （例如切换阅读模式）会把用户拽回恢复时的位置。
+  void clearPageJumpTarget() {
+    if (pageJumpTarget.value != null) {
+      pageJumpTarget.value = null;
+    }
   }
 
   // 下一页
@@ -918,8 +978,7 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
 
   @override
   void onClose() {
-    ComicCacheConfigStore.revision
-        .removeListener(_onCacheConfigChanged);
+    ComicCacheConfigStore.revision.removeListener(_onCacheConfigChanged);
     _positionThrottle?.cancel();
     cacheService.dispose();
     // 保存历史与同步进度都可能因存储/网络不可用而失败，
