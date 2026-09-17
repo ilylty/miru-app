@@ -10,6 +10,7 @@ import 'package:miru_app/models/index.dart';
 import 'package:miru_app/router/router.dart';
 import 'package:miru_app/utils/comic_cache_config_store.dart';
 import 'package:miru_app/views/widgets/platform_widget.dart';
+import 'package:miru_app/views/widgets/watch/control_panel_footer.dart';
 import 'package:miru_app/views/widgets/watch/reader_view.dart';
 
 import 'comic_strip_seamless_test.dart'
@@ -216,6 +217,37 @@ void main() {
       // 采样交叉验证：AppBar 正上方那一条也是面板色。
       expect(sameColor(px[cutoutTop - 1]!, panelColor), isTrue,
           reason: 'AppBar 上方 y=${cutoutTop - 1} 应为面板色，实际 ${px[cutoutTop - 1]}');
+    });
+
+    testWidgets('底部面板：背景铺到底部边缘，不能透出漫画', (tester) async {
+      final px = await pumpReaderAndSample(
+        tester,
+        showPanel: true,
+        rows: const [700, 719, 721, 740, 779, 799],
+      );
+
+      // 底部面板高 80，贴在屏幕底部（y=720..799）。
+      final footer =
+          tester.getRect(find.byType(ControlPanelFooter<ComicController>));
+      expect(footer.bottom, 800,
+          reason: '底部面板应贴到屏幕底部（实际 bottom=${footer.bottom}）');
+      expect(footer.height, 80,
+          reason: '底部面板高度应为 80（实际 ${footer.height}）');
+
+      // ★ 面板区域内不能是纯漫画内容色 —— 否则就是「面板背景没铺上、
+      //   透出下面的漫画」（与顶部那次 bug 同源）。
+      //   面板色是半透明的（`withOpacity(0.9)`），所以只能断言
+      //   「不再是内容色」，不能断言等于某个固定色。
+      for (final y in [721, 740, 779, 799]) {
+        expect(
+          sameColor(px[y]!, contentColor),
+          isFalse,
+          reason: 'y=$y 属于底部面板区域，不应透出漫画内容（${px[y]}）',
+        );
+      }
+      // 面板上方仍是漫画（面板没有盖住整屏）。
+      expect(sameColor(px[700]!, contentColor), isTrue,
+          reason: 'y=700 应仍是漫画内容，实际 ${px[700]}');
     });
 
     testWidgets('没有刘海 inset 时行为不变（面板仍铺满顶部）', (tester) async {

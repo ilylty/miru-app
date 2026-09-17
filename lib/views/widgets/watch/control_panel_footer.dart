@@ -1,11 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:get/get.dart';
 import 'package:miru_app/controllers/watch/reader_controller.dart';
 import 'package:miru_app/utils/i18n.dart';
 import 'package:miru_app/views/widgets/button.dart';
+import 'package:miru_app/views/widgets/platform_widget.dart';
 
 class ControlPanelFooter<T extends ReaderController> extends StatelessWidget {
   const ControlPanelFooter(this.tag, {super.key});
@@ -18,7 +17,11 @@ class ControlPanelFooter<T extends ReaderController> extends StatelessWidget {
       height: 80,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
-        color: Platform.isAndroid
+        // 用 `isAndroidLayout` 而不是 `Platform.isAndroid`：前者是仓库统一的
+        // 判断源（`platform_widget.dart`），也是 Android 专属布局唯一的
+        // 测试注入点（`debugForceAndroidLayout`）。直接读 `Platform.isAndroid`
+        // 会让这段布局在 Windows/CI 上永远走不到、无法验证。
+        color: isAndroidLayout
             ? Theme.of(context).colorScheme.background.withOpacity(0.9)
             : Colors.transparent,
         borderRadius: const BorderRadius.only(
