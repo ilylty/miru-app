@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:fluent_ui/fluent_ui.dart' as fluent;
@@ -194,7 +192,7 @@ class _ComicReaderContentState extends State<ComicReaderContent> {
 
   _buildContent() {
     late Color backgroundColor;
-    if (Platform.isAndroid) {
+    if (isAndroidLayout) {
       backgroundColor = Theme.of(context).colorScheme.background;
     } else {
       backgroundColor = fluent.FluentTheme.of(context).micaBackgroundColor;

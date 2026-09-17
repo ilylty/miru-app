@@ -66,7 +66,12 @@ class SettingsExpanderTile extends StatelessWidget {
             appBar: AppBar(
               title: Text(title),
             ),
-            body: content,
+            // 内容可能比一屏高（如漫画阅读器里的漫画缓存面板），
+            // 必须可滚动，否则会 RenderFlex overflow。
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: content,
+            ),
           ),
         );
       },
