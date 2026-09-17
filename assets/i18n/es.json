@@ -29,7 +29,7 @@
     "save": "Guardar",
     "save-success": "Guardado con éxito",
     "logout": "Cerrar sesión",
-    "login": "Iniciar sesión", 
+    "login": "Iniciar sesión",
     "no-data": "Sin datos",
     "clear": "Limpiar",
     "export": "Exportar"
@@ -268,5 +268,25 @@
     "episodes": "Episodios",
     "manga-chapter-read": "Leído capítulo de manga: {chapters}",
     "anime-episode-watch": "Visto episodio de anime: {episodes}"
+  },
+  "comic-cache": {
+    "title": "Comic Cache",
+    "subtitle": "Pre-download upcoming chapters for offline-smooth reading.",
+    "enabled": "Enable comic cache",
+    "enabled-subtitle": "Pre-download chapter images to the local disk cache",
+    "preload-count": "Preload following chapters (n)",
+    "preload-count-subtitle": "Producer: automatically cache the next n chapters",
+    "chapter-interval": "Chapter cache interval (l, seconds)",
+    "chapter-interval-subtitle": "Delay between starting two consecutive chapters",
+    "image-interval": "Image cache interval (m, seconds)",
+    "image-interval-subtitle": "Delay between two images inside one chapter",
+    "max-concurrent": "Max concurrent downloads",
+    "max-concurrent-subtitle": "How many chapters may be cached at the same time",
+    "max-disk-size": "Disk cache limit (MB)",
+    "max-disk-size-subtitle": "0 means unlimited",
+    "cache-on-read": "Cache while reading",
+    "cache-on-read-subtitle": "Consumer: also cache the chapter being read",
+    "seamless-switch": "Seamless webtoon chapter switching",
+    "seamless-switch-subtitle": "Merge adjacent chapters into one continuous strip when scrolling"
   }
 }

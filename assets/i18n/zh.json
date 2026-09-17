@@ -286,5 +286,25 @@
     "episodes": "进度",
     "manga-chapter-read": "看过的漫画章节: {chapters}",
     "anime-episode-watch": "看过的动画剧集: {episodes}"
+  },
+  "comic-cache": {
+    "title": "漫画缓存",
+    "subtitle": "提前缓存后续章节，翻页/换话无感不卡顿。",
+    "enabled": "开启漫画缓存",
+    "enabled-subtitle": "把章节图片预下载到本地磁盘缓存",
+    "preload-count": "自动缓存后 n 话",
+    "preload-count-subtitle": "生产者：自动缓存当前话之后的 n 话",
+    "chapter-interval": "每话缓存间隔 l（秒）",
+    "chapter-interval-subtitle": "相邻两话开始缓存之间的等待时间",
+    "image-interval": "图片缓存间隔 m（秒）",
+    "image-interval-subtitle": "同一话内两张图片下载之间的等待时间",
+    "max-concurrent": "最大并发数",
+    "max-concurrent-subtitle": "同时缓存多少话",
+    "max-disk-size": "磁盘缓存上限（MB）",
+    "max-disk-size-subtitle": "0 表示不限制",
+    "cache-on-read": "阅读时顺带缓存",
+    "cache-on-read-subtitle": "消费者：正在阅读的这一话也缓存",
+    "seamless-switch": "条漫无感切换章节",
+    "seamless-switch-subtitle": "滚动时把相邻章节拼成一条连续流，翻下一话/回上一话无感"
   }
 }

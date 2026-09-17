@@ -33,4 +33,10 @@ class I18nUtils {
 
 extension I18nString on String {
   String get i18n => FlutterI18n.translate(_context, this);
+
+  /// 在**已有 [BuildContext]** 的 Widget 里翻译。
+  ///
+  /// 比 [i18n] 更安全：不依赖全局 navigator context，
+  /// 因此可以在任何 [Localizations] 作用域内使用（含测试环境）。
+  String trIn(BuildContext context) => FlutterI18n.translate(context, this);
 }

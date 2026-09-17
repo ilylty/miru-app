@@ -6,6 +6,7 @@ import 'package:hive_flutter/adapters.dart';
 import 'package:isar/isar.dart';
 import 'package:miru_app/models/index.dart';
 import 'package:miru_app/utils/miru_directory.dart';
+import 'package:miru_app/utils/comic_cache_config_store.dart';
 import 'package:path/path.dart' as p;
 
 class MiruStorage {
@@ -135,6 +136,11 @@ class MiruStorage {
     await _initSetting(SettingKey.subtitleBackgroundColor, Colors.black.value);
     await _initSetting(SettingKey.subtitleBackgroundOpacity, 0.5);
     await _initSetting(SettingKey.subtitleTextAlign, TextAlign.center.index);
+    // 漫画缓存配置（生产者 / 消费者）
+    await _initSetting(
+      SettingKey.comicCacheConfig,
+      ComicCacheConfigStore.encode(const ComicCacheConfig()),
+    );
   }
 
   static _initSetting(String key, dynamic value) async {
@@ -201,4 +207,5 @@ class SettingKey {
   static const subtitleTextAlign = "SubtitleTextAlign";
   static const subtitleLastLanguageSelected = "SubtitleLastLanguageSelected";
   static const subtitleLastTitleSelected = "SubtitleLastTitleSelected";
+  static const comicCacheConfig = "ComicCacheConfig";
 }

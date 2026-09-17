@@ -1,3 +1,5 @@
+export 'comic_cache_config.dart';
+export 'comic_strip.dart';
 export 'extension.dart';
 export 'favorite.dart';
 export 'history.dart';

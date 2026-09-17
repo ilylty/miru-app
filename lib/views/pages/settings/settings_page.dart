@@ -20,6 +20,7 @@ import 'package:miru_app/views/widgets/settings/settings_radios_tile.dart';
 import 'package:miru_app/views/widgets/settings/settings_switch_tile.dart';
 import 'package:miru_app/views/widgets/settings/settings_numberbox_button.dart';
 import 'package:miru_app/views/widgets/settings/settings_tile.dart';
+import 'package:miru_app/views/widgets/settings/comic_cache_settings.dart';
 import 'package:miru_app/utils/i18n.dart';
 import 'package:miru_app/utils/miru_storage.dart';
 import 'package:miru_app/utils/application.dart';
@@ -367,6 +368,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 return MiruStorage.getSetting(SettingKey.readingMode);
               },
             ),
+            const SizedBox(height: 10),
+            // 漫画缓存配置
+            const ComicCacheSettings(),
           ],
         ),
       ),

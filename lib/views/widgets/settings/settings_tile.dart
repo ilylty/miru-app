@@ -43,19 +43,27 @@ class _SettingsTileState extends State<SettingsTile> {
           widget.icon!,
           const SizedBox(width: 16),
         ],
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(widget.title),
-            if (widget.buildSubtitle != null)
+        // 用 Expanded 包裹：副标题较长的设置项（如漫画缓存）
+        // 在窄窗口下会被挤压而不是溢出。
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
               Text(
-                widget.buildSubtitle!.call(),
-                style: const TextStyle(fontSize: 12),
-              )
-          ],
+                widget.title,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (widget.buildSubtitle != null)
+                Text(
+                  widget.buildSubtitle!.call(),
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                )
+            ],
+          ),
         ),
-        const Spacer(),
+        const SizedBox(width: 12),
         widget.trailing ?? const SizedBox(),
       ],
     );

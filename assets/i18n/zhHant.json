@@ -172,5 +172,25 @@
     "stop": "停止",
     "upgrade": "升级",
     "start": "啟動"
+  },
+  "comic-cache": {
+    "title": "漫畫快取",
+    "subtitle": "預先快取後續章節，換話無感不卡頓。",
+    "enabled": "開啟漫畫快取",
+    "enabled-subtitle": "把章節圖片預先下載到本機磁碟快取",
+    "preload-count": "自動快取後 n 話",
+    "preload-count-subtitle": "生產者：自動快取目前話之後的 n 話",
+    "chapter-interval": "每話快取間隔 l（秒）",
+    "chapter-interval-subtitle": "相鄰兩話開始快取之間的等待時間",
+    "image-interval": "圖片快取間隔 m（秒）",
+    "image-interval-subtitle": "同一話內兩張圖片下載之間的等待時間",
+    "max-concurrent": "最大並行數",
+    "max-concurrent-subtitle": "同時快取多少話",
+    "max-disk-size": "磁碟快取上限（MB）",
+    "max-disk-size-subtitle": "0 表示不限制",
+    "cache-on-read": "閱讀時順便快取",
+    "cache-on-read-subtitle": "消費者：正在閱讀的這一話也快取",
+    "seamless-switch": "條漫無感切換章節",
+    "seamless-switch-subtitle": "捲動時把相鄰章節拼成一條連續流，翻下一話／回上一話無感"
   }
 }
