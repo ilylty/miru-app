@@ -201,8 +201,10 @@ class _NovelReaderContentState extends State<NovelReaderContent> {
   }
 
   Widget _buildAndroid(BuildContext context) {
+    // 阅读时已进入沉浸模式（见 `ReaderController.onInit`），系统栏被隐藏，
+    // 所以**不**再包 `SafeArea` —— 否则会留下状态栏/小白条那么宽的黑边。
     return Scaffold(
-      body: SafeArea(child: _buildContent()),
+      body: _buildContent(),
     );
   }
 

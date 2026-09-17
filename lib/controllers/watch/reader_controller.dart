@@ -6,6 +6,7 @@ import 'package:miru_app/models/history.dart';
 import 'package:miru_app/controllers/home_controller.dart';
 import 'package:miru_app/data/services/database_service.dart';
 import 'package:miru_app/data/services/extension_service.dart';
+import 'package:miru_app/utils/immersive_mode.dart';
 
 class ReaderController<T> extends GetxController {
   final String title;
@@ -35,11 +36,42 @@ class ReaderController<T> extends GetxController {
   get cuurentPlayUrl => playList[index.value].url;
   Timer? _timer;
 
+  /// 是否已进入沉浸模式。
+  ///
+  /// 用实例字段而不是只依赖 [ImmersiveMode] 的引用计数：
+  /// GetX 在「注册了但从未构建就删除」时也会调用 `onClose`，
+  /// 那时 `onInit` 从未跑过，不能去配对地减少计数。
+  bool _immersiveEntered = false;
+
   @override
   void onInit() {
+    // 阅读时隐藏系统栏（状态栏 + 底部导航 / 手势条）。
+    //
+    // ★ Android 上 `Scaffold` 只会把内容限制在系统栏之间，状态栏与底部
+    //   「小白条」依然可见 —— 漫画/小说阅读时这既浪费屏幕也干扰沉浸感。
+    //   做法与视频播放器一致（`SystemUiMode.immersiveSticky`），
+    //   但放在基类里，让漫画与小说阅读器都生效。
+    _enterImmersive();
     getContent();
     ever(index, (callback) => getContent());
     super.onInit();
+  }
+
+  void _enterImmersive() {
+    if (_immersiveEntered) {
+      return;
+    }
+    _immersiveEntered = true;
+    unawaited(ImmersiveMode.enter());
+  }
+
+  @override
+  void onClose() {
+    if (_immersiveEntered) {
+      _immersiveEntered = false;
+      unawaited(ImmersiveMode.exit());
+    }
+    super.onClose();
   }
 
   getContent() async {

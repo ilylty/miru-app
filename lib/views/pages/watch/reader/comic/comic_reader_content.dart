@@ -249,12 +249,14 @@ class _ComicReaderContentState extends State<ComicReaderContent> {
   Widget build(BuildContext context) {
     return PlatformBuildWidget(
       androidBuilder: (context) {
+        // 阅读时已进入沉浸模式（见 `ReaderController.onInit`），系统栏被隐藏，
+        // 所以**不**再包 `SafeArea` —— 否则会白白留下状态栏/小白条那么宽的
+        // 黑边，画面无法铺满整屏。
         return Scaffold(
-            body: SafeArea(
-          child: _buildDisplay(
+          body: _buildDisplay(
             _buildContent(),
           ),
-        ));
+        );
       },
       desktopBuilder: (context) => _buildDisplay(
         _buildContent(),

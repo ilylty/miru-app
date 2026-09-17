@@ -65,29 +65,44 @@ jobs:
           KEY_PASSWORD: android
         run: flutter build apk --release --split-per-abi
 
-      - name: Upload app-arm64-v8a-release.apk
+      # APK 是已压缩的 zip，再压一遍只是白费 CPU 且可能让二次压缩的包更难增量下载。
+      # 统一改名为 miru-<版本>-<abi>.apk，便于用户识别是哪个应用、哪个版本。
+      - name: Rename APKs to miru-${{ env.APP_VERSION }}-<abi>.apk
         if: matrix.target == 'android'
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-arm64-v8a-release.apk
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          if-no-files-found: error
+        shell: bash
+        run: |
+          cd build/app/outputs/flutter-apk
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            mv "app-$abi-release.apk" "miru-${{ env.APP_VERSION }}-$abi.apk"
+          done
+          ls -l
 
-      - name: Upload app-armeabi-v7a-release.apk
+      - name: Upload miru-${{ env.APP_VERSION }}-arm64-v8a.apk
         if: matrix.target == 'android'
         uses: actions/upload-artifact@v4
         with:
-          name: app-armeabi-v7a-release.apk
-          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          name: miru-${{ env.APP_VERSION }}-arm64-v8a.apk
+          path: build/app/outputs/flutter-apk/miru-${{ env.APP_VERSION }}-arm64-v8a.apk
           if-no-files-found: error
+          compression-level: 0
 
-      - name: Upload app-x86_64-release.apk
+      - name: Upload miru-${{ env.APP_VERSION }}-armeabi-v7a.apk
         if: matrix.target == 'android'
         uses: actions/upload-artifact@v4
         with:
-          name: app-x86_64-release.apk
-          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
+          name: miru-${{ env.APP_VERSION }}-armeabi-v7a.apk
+          path: build/app/outputs/flutter-apk/miru-${{ env.APP_VERSION }}-armeabi-v7a.apk
           if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload miru-${{ env.APP_VERSION }}-x86_64.apk
+        if: matrix.target == 'android'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miru-${{ env.APP_VERSION }}-x86_64.apk
+          path: build/app/outputs/flutter-apk/miru-${{ env.APP_VERSION }}-x86_64.apk
+          if-no-files-found: error
+          compression-level: 0
 
       # ---------------- Windows ----------------
       - name: Build Windows release
@@ -155,6 +170,8 @@ jobs:
           name: miru-setup-${{ env.APP_VERSION }}.exe
           path: Output/miru-setup-${{ env.APP_VERSION }}.exe
           if-no-files-found: error
+          # 安装包内部已经是 lzma 压缩数据，再压一遍几乎不减小体积。
+          compression-level: 0
 
   release:
     name: Publish release assets
@@ -174,7 +191,7 @@ jobs:
         run: |
           mkdir -p release_files
           # upload-artifact 对单文件是原样保存；对目录才打包成 zip。
-          for a in app-arm64-v8a-release.apk app-armeabi-v7a-release.apk app-x86_64-release.apk "miru-setup-${{ env.APP_VERSION }}.exe"; do
+          for a in "miru-${{ env.APP_VERSION }}-arm64-v8a.apk" "miru-${{ env.APP_VERSION }}-armeabi-v7a.apk" "miru-${{ env.APP_VERSION }}-x86_64.apk" "miru-setup-${{ env.APP_VERSION }}.exe"; do
             cp "artifacts/$a/$a" release_files/
           done
           # 目录 artifact 下载后就是发布包内容；在目录内部执行 zip，
@@ -183,6 +200,39 @@ jobs:
           ls -lh release_files
           echo "=== windows zip top-level ==="
           unzip -l "release_files/Miru-${{ env.APP_VERSION }}-windows.zip" | awk '{print $4}' | grep -v '/' | grep -v '^$' | head -20
+
+      # 本次改了 APK 命名（app-<abi>-release.apk → miru-<版本>-<abi>.apk）。
+      # draft release 上还留着旧名字的资产，不清掉的话同一个 release 里会同时
+      # 出现两套 APK，用户不知道该下哪个。这里删掉所有「不在本次发布清单里」
+      # 的资产。
+      - name: Drop stale release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 这一步没有 `actions/checkout`（release job 里不需要源码），
+          # 不指定仓库的话 `gh` 会因「不是 git 仓库」直接报错。
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ env.APP_VERSION }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag 还不存在，跳过"
+            exit 0
+          fi
+          ls release_files > /tmp/wanted.txt
+          echo "=== 本次发布清单 ==="
+          cat /tmp/wanted.txt
+          gh release view "$tag" --json assets --jq '.assets[].name' > /tmp/existing.txt
+          while IFS= read -r name; do
+            if [ -z "$name" ]; then
+              continue
+            fi
+            if grep -qxF "$name" /tmp/wanted.txt; then
+              continue
+            fi
+            echo "删除陈旧资产: $name"
+            gh release delete-asset "$tag" "$name" --yes
+          done < /tmp/existing.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -193,8 +243,13 @@ jobs:
             Custom build from fork `ilylty/miru-app` (branch dev).
 
             - Webtoon 条漫相邻图片接缝修复
+            - 漫画缓存系统（生产者预缓存后 n 话 / 消费者阅读即缓存，话间隔 l、图间隔 m 可配置）+ 条漫无感切换
+            - 章节元数据持久化：再次进入漫画直接用本地缓存，秒开
+            - 恢复上次阅读位置精确到「第几话第几页」
+            - Android 阅读沉浸：阅读漫画/小说时隐藏状态栏与底部手势条
             - Android: 默认调试签名（与官方签名不同，安装前需卸载官方版）
             - Windows: 捆绑最新 MSVC 运行库，修复启动闪退 (0xC0000005)
+            - 产物不二次压缩：3 个 APK 与 setup exe 均为原样打包，APK 命名为 `miru-<版本>-<abi>.apk`
           draft: true
           files: release_files/*
           fail_on_unmatched_files: true
