@@ -18,6 +18,11 @@ class ImmersiveMode {
   static int _holders = 0;
   static bool _applied = false;
 
+  // 注意：`_applied` 假设「除了本类，没有别人改系统 UI 模式」。
+  // 视频播放器（`VideoPlayerController`）是唯一的例外 —— 它直接调
+  // `SystemChrome.setEnabledSystemUIMode` 而不是走本类，但它与阅读器
+  // 不会同时存在（`WatchPage` 只会构造其中一种），所以不会互相踩。
+
   /// 当前是否处于沉浸模式（供测试断言）。
   static bool get isActive => _holders > 0;
 
