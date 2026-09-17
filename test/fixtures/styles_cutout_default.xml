@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  测试夹具：一个「看起来加了属性、但值是错的」的 styles.xml。
+
+  用来证明测试真的在断言 `shortEdges` 这个值，而不只是「属性存在」：
+  `default` 在系统栏隐藏时不会把内容画进刘海区域，正是黑带的成因。
+-->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+    </style>
+</resources>
