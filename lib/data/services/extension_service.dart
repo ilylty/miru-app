@@ -671,6 +671,12 @@ async function stringify(callback) {
     };
   }
 
+  /// 当前默认 headers（含最新的 Cookie）。
+  ///
+  /// 从本地缓存恢复章节时，需要用它把**过期的会话凭据**换成最新的，
+  /// 否则会拿旧 Cookie 去请求图片，得到 403 空白图。
+  Future<Map<String, String>> get defaultHeaders => _defaultHeaders;
+
   Future<List<ExtensionListItem>> latest(int page) async {
     return runExtension(() async {
       final jsResult = await runtime.handlePromise(

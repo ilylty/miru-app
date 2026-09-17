@@ -258,6 +258,24 @@ class ComicStripModel {
     return indexes.join(',');
   }
 
+  /// 布局签名：章节集合 **+ 每话的图片数量**。
+  ///
+  /// 与 [windowSignature] 的区别：当某一话的图片列表被整体替换
+  /// （例如回源刷新后发现签名 URL 过期、张数也变了）时，
+  /// 章节集合没变但**扁平下标会整体平移**，此时必须重建列表
+  /// 并做锚点补偿，否则用户会看到位置跳动。
+  ///
+  /// 普通滚动（章节集合与张数都不变）依旧零重建。
+  String get layoutSignature {
+    final indexes = windowChapterIndexes;
+    if (indexes.isEmpty) {
+      return 'empty';
+    }
+    return indexes
+        .map((i) => '$i:${_chapters[i]!.urls.length}')
+        .join(',');
+  }
+
   /// 窗口展开后的扁平条目列表。
   List<StripItem> get items {
     final result = <StripItem>[];

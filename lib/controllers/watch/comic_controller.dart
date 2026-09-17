@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:miru_app/data/providers/anilist_provider.dart';
 import 'package:miru_app/data/services/comic_cache_service.dart';
+import 'package:miru_app/data/services/comic_chapter_cache.dart';
 import 'package:miru_app/data/services/comic_image_cache.dart';
 import 'package:miru_app/models/index.dart';
 import 'package:miru_app/controllers/watch/reader_controller.dart';
@@ -16,13 +17,21 @@ import 'package:miru_app/utils/miru_storage.dart';
 
 /// 漫画阅读控制器。
 ///
-/// 相比原版增加了两块能力：
+/// 相比原版增加了三块能力：
 /// 1. **漫画缓存系统**（生产者 + 消费者，全部可配置）
 ///    - 生产者：[ComicCacheService] 按配置自动缓存「当前话之后的 n 话」，
 ///      每话间隔 l 秒、话内图片间隔 m 秒；
 ///    - 消费者：用户实际阅读的章节同样入队缓存，间隔同样受配置控制。
 ///
-/// 2. **条漫无感切换**
+/// 2. **章节元数据缓存**（首屏秒开的关键）
+///    - 图片字节缓存（[ComicImageCache]）解决「图不用重下」，
+///      但解决不了「该画哪些 URL」——后者每次进入都要跑一遍扩展
+///      （QuickJS 求值 + 网络 + HTML 解析），这才是「进入要等很久」的根因；
+///    - 所以这里额外把「每一话有哪些图片 URL」也持久化
+///      （[ComicChapterStore]），进入时**同步**读出来直接渲染，
+///      完全不需要等网络；随后再在后台回源校正。
+///
+/// 3. **条漫无感切换**
 ///    - 相邻章节被拼进同一条连续图片流（[ComicStripModel] + `ComicStripView`）；
 ///    - 滚动跨话只更新「当前话」状态，**不触发内容重载**，
 ///      因此没有白屏、没有位置突变、没有滚动惯性中断。
@@ -38,9 +47,11 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
     required super.anilistID,
     ComicCacheConfig? config,
     ComicCacheService? cacheService,
+    ComicChapterStore? chapterStore,
     MangaReadMode? initialReadMode,
   }) {
     _initialReadMode = initialReadMode;
+    this.chapterStore = chapterStore ?? const HiveComicChapterStore();
     cacheConfig = config ?? ComicCacheConfigStore.load();
     strip = ComicStripModel(
       currentChapter: playIndex,
@@ -104,6 +115,9 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   /// 当前生效的漫画缓存配置（设置页修改后调用 [reloadCacheConfig] 刷新）。
   late ComicCacheConfig cacheConfig;
 
+  /// 章节元数据缓存（「这一话有哪些图片 URL」）。
+  late final ComicChapterStore chapterStore;
+
   /// 连续流模型（渲染窗口最多 [ComicStripModel.defaultMaxWindowChapters] 话）。
   late final ComicStripModel strip;
 
@@ -134,6 +148,21 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   /// 各章节的失败原因（成功装载时会移除）。
   final Map<int, String> _chapterErrors = <int, String>{};
   String _lastChapterError = '';
+
+  /// 已经从元数据缓存恢复的章节 → 其缓存时的播放列表 URL。
+  ///
+  /// 用于区分「从缓存恢复」与「刚从扩展拿到」：前者需要在后台回源校正。
+  final Map<int, String> _cachedChapterUrls = <int, String>{};
+
+  /// 已恢复章节的缓存时间（用于判断是否需要回源校正）。
+  final Map<int, DateTime> _cachedChapterAt = <int, DateTime>{};
+
+  /// 元数据缓存的新鲜期。
+  ///
+  /// 在这个时间内的缓存**完全不回源** —— 用户读完一话退出去再进来，
+  /// 或者一天内反复阅读同一部作品，都是零网络、秒开。
+  /// 超过之后才在后台静默校正（不影响首屏）。
+  static const Duration revalidateTtl = Duration(minutes: 30);
 
   /// 请求条漫视图在下一帧把当前话对齐到顶部（用户主动跳章时）。
   final jumpChapterRequest = 0.obs;
@@ -226,12 +255,215 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
     super.onInit();
   }
 
-  /// 初始化：先定阅读模式（含存储恢复），再按需预装载连续流窗口。
+  /// 初始化：先定阅读模式，再**同步**用元数据缓存铺出首屏，最后后台回源。
+  ///
+  /// ★ 这是「每次进入要等很久」的核心修复：
+  ///   旧实现里 [_bootstrap] 直接 `await ensureStripWindow(...)`，
+  ///   而窗口装载必须逐个跑扩展 `watch()`（QuickJS + 网络 + HTML 解析），
+  ///   且请求是串行的（QuickJS 不适合并发求值）。于是即使图片早就缓存好了，
+  ///   用户仍然要盯着转圈等到「当前话 ± 若干话」的元数据全部返回。
+  ///
+  ///   现在把顺序倒过来：
+  ///     1. 先同步读元数据缓存（Hive 常驻内存，零 IO 等待）→ 立刻出图；
+  ///     2. 首屏铺好后，后台去回源校正（见 [_refreshChaptersInBackground]）。
   Future<void> _bootstrap() async {
     await _initSetting();
-    if (isSeamlessStrip) {
-      await ensureStripWindow(index.value);
+    if (!isSeamlessStrip) {
+      return;
     }
+    // 1. 同步铺首屏：不 await 任何网络。
+    final restored = _hydrateFromCache(index.value);
+    if (restored > 0) {
+      stripRevision.value++;
+      _syncWatchData();
+      _scheduleConsumerCache();
+    }
+    // 2. 后台回源校正（补齐缺的章节、刷新可能过期的 URL）。
+    unawaited(_refreshChaptersInBackground());
+  }
+
+  /// 从元数据缓存同步装载以 [center] 为中心的窗口。
+  ///
+  /// 返回实际恢复的章节数。纯同步 —— 不产生任何 IO 等待，
+  /// 这是首屏能「秒出」的前提。
+  int _hydrateFromCache(int center) {
+    final clamped = center.clamp(0, playList.length - 1);
+    strip.updateTotalChapters(playList.length);
+    strip.jumpToChapter(clamped);
+    // 缓存命中范围比渲染窗口略宽，这样稍微滑一下也不用等网络。
+    final range = strip.prefetchRange(
+      forwardExtra: ComicStripModel.prefetchMargin,
+      backwardExtra: ComicStripModel.prefetchMargin,
+    );
+    var restored = 0;
+    for (final chapterIndex in range) {
+      if (strip.hasChapter(chapterIndex)) {
+        continue;
+      }
+      final entry = _readCacheEntry(chapterIndex);
+      if (entry == null) {
+        continue;
+      }
+      strip.putChapter(StripChapter(
+        index: chapterIndex,
+        urls: entry.urls,
+        title: playList[chapterIndex].name,
+        headers: entry.headers,
+      ));
+      _cachedChapterUrls[chapterIndex] = entry.chapterUrl;
+      _cachedChapterAt[chapterIndex] = entry.updatedAt;
+      restored++;
+    }
+    if (restored > 0) {
+      strip.pruneOutsideWindow();
+    }
+    return restored;
+  }
+
+  /// 读取单话的元数据缓存（索引越界 / 无缓存 → null）。
+  ComicChapterCacheEntry? _readCacheEntry(int chapterIndex) {
+    if (chapterIndex < 0 || chapterIndex >= playList.length) {
+      return null;
+    }
+    try {
+      return chapterStore.read(
+        detailUrl,
+        chapterIndex,
+        chapterUrl: playList[chapterIndex].url,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 把一话写回元数据缓存（失败不影响阅读）。
+  Future<void> _writeCacheEntry(int chapterIndex, StripChapter chapter) async {
+    if (chapterIndex < 0 || chapterIndex >= playList.length) {
+      return;
+    }
+    _cachedChapterUrls[chapterIndex] = playList[chapterIndex].url;
+    _cachedChapterAt[chapterIndex] = DateTime.now();
+    try {
+      await chapterStore.write(
+        detailUrl,
+        chapterIndex,
+        ComicChapterCacheEntry(
+          chapterUrl: playList[chapterIndex].url,
+          urls: chapter.urls,
+          headers: chapter.headers,
+          title: chapter.title,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } catch (_) {
+      // 写缓存失败不能影响阅读。
+    }
+  }
+
+  /// 首屏铺好之后的后台回源：把缺的章节补上、把缓存里的 URL 校正一遍。
+  ///
+  /// 不阻塞 UI：用户已经在看图了，这一步只是让「下一话」更快就位、
+  /// 以及处理「服务端签名 URL 过期」这类情况。
+  Future<void> _refreshChaptersInBackground() async {
+    try {
+      final center = index.value;
+      // 缺的章节：必须装载（否则滑到那里会转圈）。
+      await ensureStripWindow(center);
+      // 已有的缓存章节：并发受控地回源校正。
+      await _revalidateCachedChapters(center);
+    } catch (_) {
+      // 后台任务不允许把异常抛到 UI。
+    }
+  }
+
+  /// 回源校正已从缓存恢复的章节。
+  ///
+  /// ★ 只处理**不新鲜**的缓存（超过 [revalidateTtl]）。
+  ///   刚读过就退出再进来的场景下，全部缓存都是新鲜的，
+  ///   于是这里一个请求都不发 —— 真正做到「再次进入直接用本地缓存」。
+  ///
+  /// 只在「张数或 URL 发生变化」时才替换（并用 [ComicStripModel.layoutSignature]
+  /// 触发一次带锚点补偿的重建），正常情况下内容一致，什么都不会发生。
+  Future<void> _revalidateCachedChapters(int center) async {
+    final now = DateTime.now();
+    final candidates = strip
+        .prefetchRange()
+        .where((i) => _cachedChapterUrls.containsKey(i))
+        .where((i) {
+      final at = _cachedChapterAt[i];
+      return at == null || now.difference(at) >= revalidateTtl;
+    }).toList();
+    if (candidates.isEmpty) {
+      return;
+    }
+    // 中心优先，且并发受限（QuickJS 不适合并发求值，这里保守一点）。
+    candidates.sort((a, b) => (a - center).abs().compareTo((b - center).abs()));
+    const maxConcurrent = 2;
+    for (var i = 0; i < candidates.length; i += maxConcurrent) {
+      final batch = candidates.skip(i).take(maxConcurrent);
+      await Future.wait(batch.map(_revalidateChapter));
+    }
+  }
+
+  /// 回源单话；内容确实变了才替换（并让视图重建 + 锚点补偿）。
+  Future<void> _revalidateChapter(int chapterIndex) async {
+    final cached = strip.chapterAt(chapterIndex);
+    if (cached == null || cached.urls.isEmpty) {
+      return;
+    }
+    try {
+      final raw = await _serialize(
+        () => runtime.watch(playList[chapterIndex].url),
+      );
+      final data = raw is ExtensionMangaWatch ? raw : null;
+      if (data == null || data.urls.isEmpty) {
+        return;
+      }
+      // 内容完全一致（张数与逐条 URL 都相同）→ 什么都不用做。
+      if (_sameUrls(cached.urls, data.urls)) {
+        return;
+      }
+      // 有变化：先确认该话仍在窗口里，避免给已滚出窗口的章节做无用重建。
+      if (!strip.hasChapter(chapterIndex)) {
+        return;
+      }
+      final refreshed = StripChapter(
+        index: chapterIndex,
+        urls: List<String>.from(data.urls),
+        title: playList[chapterIndex].name,
+        headers: data.headers ?? cached.headers,
+      );
+      strip.putChapter(refreshed);
+      await _writeCacheEntry(chapterIndex, refreshed);
+      _cachedChapterAt[chapterIndex] = DateTime.now();
+      // 张数变了会平移扁平下标 → 触发一次带锚点补偿的重建。
+      _applyLayoutChange();
+    } catch (_) {
+      // 回源失败（网络波动等）：继续用缓存内容，不打扰用户。
+    }
+  }
+
+  static bool _sameUrls(List<String> a, List<String> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// 内容被就地替换（张数可能变化）→ 让视图重建并做像素级锚点补偿。
+  ///
+  /// 只有当扁平下标真的会变时才需要重建；[ComicStripView] 会自己比较
+  /// 布局签名，签名不变就不重建。
+  void _applyLayoutChange() {
+    if (!seamlessEnabled.value) {
+      return;
+    }
+    stripRevision.value++;
   }
 
   /// 重新读取配置（设置页修改后调用）。
@@ -267,6 +499,10 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   /// 装载单个章节；已装载则直接返回。**不会**触发列表重建。
   ///
   /// 同一个章节的并发请求会被合并（只真正装载一次）。
+  ///
+  /// ★ 缓存优先：只要元数据缓存里有这一话，就**同步**返回，
+  ///   完全不碰网络。这让所有调用方（首屏、窗口滑动、缓存服务）
+  ///   都自动享受「秒开」，而不只是首屏。
   Future<StripChapter?> loadStripChapter(int chapterIndex) {
     if (chapterIndex < 0 || chapterIndex >= playList.length) {
       return Future<StripChapter?>.value(null);
@@ -274,6 +510,20 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
     final existing = strip.chapterAt(chapterIndex);
     if (existing != null && existing.urls.isNotEmpty) {
       return Future<StripChapter?>.value(existing);
+    }
+    // 同步命中元数据缓存 → 立即返回，无需网络。
+    final cached = _readCacheEntry(chapterIndex);
+    if (cached != null) {
+      final chapter = StripChapter(
+        index: chapterIndex,
+        urls: cached.urls,
+        title: playList[chapterIndex].name,
+        headers: cached.headers,
+      );
+      strip.putChapter(chapter);
+      _cachedChapterUrls[chapterIndex] = playList[chapterIndex].url;
+      _cachedChapterAt[chapterIndex] = cached.updatedAt;
+      return Future<StripChapter?>.value(chapter);
     }
     final pending = _pendingChapterLoads[chapterIndex];
     if (pending != null) {
@@ -306,6 +556,8 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
         headers: data.headers,
       );
       strip.putChapter(chapter);
+      // 持久化「这一话有哪些图片 URL」：下次进入就能直接秒开。
+      await _writeCacheEntry(chapterIndex, chapter);
       // 该话已成功：清掉它的失败记录，但不影响其它话的错误。
       _chapterErrors.remove(chapterIndex);
       return chapter;
@@ -350,7 +602,7 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
     strip.updateTotalChapters(playList.length);
     strip.jumpToChapter(clamped);
 
-    final signatureBefore = strip.windowSignature;
+    final signatureBefore = strip.layoutSignature;
 
     // 「必须覆盖」的范围：当前话 ± span。
     final required = strip.prefetchRange();
@@ -375,8 +627,8 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
       strip.pruneOutsideWindow();
     }
 
-    // 只有「窗口里的章节集合」变化时才重建列表。
-    if (forceReload || strip.windowSignature != signatureBefore) {
+    // 只有「窗口里的章节集合 / 各话张数」变化时才重建列表。
+    if (forceReload || strip.layoutSignature != signatureBefore) {
       stripRevision.value++;
     }
     _syncWatchData();
@@ -385,6 +637,10 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
   }
 
   /// 让 [watchData] 与「当前话」保持一致（历史记录、页码统计、headers 都依赖它）。
+  ///
+  /// ★ 从缓存恢复的章节，其 headers 里带的 Cookie 是**会话性**的，
+  ///   可能已经过期。这里用当前 cookie jar 重新拼一份，避免拿旧凭据去请求图片
+  ///   （那会得到 403 空白图，用户看到的就是「缓存了但还是白屏」）。
   void _syncWatchData() {
     final chapter = strip.chapterAt(index.value);
     if (chapter == null || chapter.urls.isEmpty) {
@@ -398,6 +654,37 @@ class ComicController extends ReaderController<ExtensionMangaWatch> {
       urls: chapter.urls,
       headers: chapter.headers,
     );
+    if (_cachedChapterUrls.containsKey(chapter.index)) {
+      unawaited(_refreshHeadersFor(chapter.index));
+    }
+  }
+
+  /// 用当前 cookie jar 刷新某一话的 headers（失败则保留原值）。
+  Future<void> _refreshHeadersFor(int chapterIndex) async {
+    try {
+      final headers = await runtime.defaultHeaders;
+      if (headers.isEmpty) {
+        return;
+      }
+      final chapter = strip.chapterAt(chapterIndex);
+      if (chapter == null) {
+        return;
+      }
+      final merged = <String, String>{
+        ...?chapter.headers,
+        ...headers,
+      };
+      strip.putChapter(chapter.copyWith(headers: merged));
+      // 只在当前正在看的就是这一话时才刷新 watchData（否则会误改其它话）。
+      if (index.value == chapterIndex) {
+        watchData.value = ExtensionMangaWatch(
+          urls: chapter.urls,
+          headers: merged,
+        );
+      }
+    } catch (_) {
+      // 刷新失败就继续用缓存里的 headers。
+    }
   }
 
   /// 滚动位置监听（节流）：驱动「当前话」切换与窗口滑动。

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:miru_app/controllers/watch/comic_controller.dart';
 import 'package:miru_app/data/services/comic_cache_service.dart';
+import 'package:miru_app/data/services/comic_chapter_cache.dart';
 import 'package:miru_app/data/services/extension_service.dart';
 import 'package:miru_app/models/index.dart';
 import 'package:miru_app/utils/comic_cache_config_store.dart';
@@ -70,12 +73,23 @@ class FakeChapterWatcher {
   final List<String> calls = [];
   Duration delay = Duration.zero;
 
+  /// 非 null 时，`watch` 会一直挂起直到它被完成。
+  ///
+  /// 比 `delay` 更好：不会产生 fake-async 定时器（那会让 widget 测试
+  /// 在结束时报「A Timer is still pending」），因此适合模拟「永远不返回」。
+  Completer<void>? gate;
+
   Future<ExtensionMangaWatch?> call(String url) async {
     calls.add(url);
+    final gate = this.gate;
+    if (gate != null) {
+      await gate.future;
+    }
     if (delay > Duration.zero) {
       await Future<void>.delayed(delay);
     }
-    final index = int.parse(Uri.parse(url).queryParameters['ep']!);    if (failChapters.contains(index)) {
+    final index = int.parse(Uri.parse(url).queryParameters['ep']!);
+    if (failChapters.contains(index)) {
       throw Exception('boom chapter $index');
     }
     return ExtensionMangaWatch(
@@ -101,6 +115,7 @@ ComicController buildController({
   ComicCacheConfig? config,
   FakeChapterWatcher? watcher,
   ComicCacheService? cacheService,
+  ComicChapterStore? chapterStore,
 }) {
   final effectiveConfig = config ??
       const ComicCacheConfig(
@@ -123,6 +138,7 @@ ComicController buildController({
     anilistID: '',
     config: effectiveConfig,
     cacheService: cacheService,
+    chapterStore: chapterStore,
     initialReadMode: MangaReadMode.webTonn,
   );
 }

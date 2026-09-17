@@ -49,8 +49,12 @@ class ComicStripViewState extends State<ComicStripView> {
   final List<int> _pointer = [];
 
   /// 上次渲染的窗口签名：只有它变化才重建列表。
+  ///
+  /// 用 [ComicStripModel.layoutSignature]（章节集合 **+ 每话张数**）：
+  /// 章节集合不变、但某一话的图片列表被整体替换（张数变化）时，
+  /// 扁平下标会平移，必须重建 + 锚点补偿；
+  /// 普通滚动（两者都不变）依旧零重建。
   String _windowSignature = '';
-
   /// 当前**已渲染**的条目列表。
   ///
   /// 锚点换算必须用它（而不是刚更新的模型），否则会把「旧列表里的下标」
@@ -63,7 +67,7 @@ class ComicStripViewState extends State<ComicStripView> {
   @override
   void initState() {
     super.initState();
-    _windowSignature = _c.strip.windowSignature;
+    _windowSignature = _c.strip.layoutSignature;
     _renderedItems = _c.strip.items;
     _appliedJumpRequest = _c.jumpChapterRequest.value;
     _c.stripRevision.listen((_) => _onStripChanged());
@@ -79,7 +83,7 @@ class ComicStripViewState extends State<ComicStripView> {
     if (!mounted) {
       return;
     }
-    final signature = _c.strip.windowSignature;
+    final signature = _c.strip.layoutSignature;
     if (signature == _windowSignature) {
       return;
     }

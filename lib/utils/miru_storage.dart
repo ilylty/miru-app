@@ -12,6 +12,13 @@ import 'package:path/path.dart' as p;
 class MiruStorage {
   static late final Isar database;
   static late final Box settings;
+
+  /// 漫画章节元数据缓存（「这一话有哪些图片 URL」）。
+  ///
+  /// 单独放一个 box：条目多、可随时丢弃，不和用户设置混在一起。
+  /// 打开后常驻内存，`get` 是同步的 —— 首屏读缓存不需要任何 IO 等待。
+  static late final Box comicChapterCache;
+
   static const int _lastDatabaseVersion = 2;
   static late String _path;
 
@@ -20,6 +27,7 @@ class MiruStorage {
     // 初始化设置
     await Hive.initFlutter(_path);
     settings = await Hive.openBox("settings");
+    comicChapterCache = await Hive.openBox("comicChapterCache");
     await _initSettings();
 
     // 初始化数据库
